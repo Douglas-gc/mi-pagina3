@@ -4,7 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Estadio</title>
-    <link rel="stylesheet" href="style.css">
+    <!-- <link rel="stylesheet" href="style3.css"> -->
+    <!-- <link rel="stylesheet" href="menubar.css"> -->
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/loading.css">
+    <link rel="stylesheet" href="css/navbar.css">
+    <link rel="stylesheet" href="css/infopanel.css">
+    <link rel="stylesheet" href="css/overlays.css">
+    <link rel="stylesheet" href="css/animations.css">
+    <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
     <!-- Loading Screen -->
@@ -98,6 +107,8 @@
 
     <!-- Three.js Script -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- GLTFLoader -->
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/GLTFLoader.js"></script>
     <script>
         // Global variables
         let scene, camera, renderer;
@@ -105,6 +116,7 @@
         let rotationSpeed = 0.003;
         let introAudio;
         let audioPlayed = false;
+        let loader;
 
         // Initialize the application
         async function init() {
@@ -122,6 +134,7 @@
             } catch (error) {
                 console.error('Initialization failed:', error);
                 hideLoadingScreen();
+                showError('Error loading stadium model. Please check if estadio.glb exists in the same directory.');
             }
         }
 
@@ -142,157 +155,86 @@
             document.getElementById('canvasContainer').appendChild(renderer.domElement);
         }
 
-        // Load stadium model (procedural generation)
+        // Load stadium model from GLB file
         async function loadStadium() {
-            updateLoadingProgress(20);
-            
-            const stadiumGroup = new THREE.Group();
-            
-            // Create field
-            const fieldGeometry = new THREE.PlaneGeometry(100, 60);
-            const fieldMaterial = new THREE.MeshLambertMaterial({ 
-                color: 0x2d5016,
-                map: createFieldTexture()
+            return new Promise((resolve, reject) => {
+                updateLoadingProgress(20);
+                
+                push_modelGLB_not_animed(0, 0, 0, '/models/estadio2.glb', 1, 1, 1, 0, 0, 0, resolve, reject);
             });
-            const field = new THREE.Mesh(fieldGeometry, fieldMaterial);
-            field.rotation.x = -Math.PI / 2;
-            field.receiveShadow = true;
-            field.userData = { type: 'field' };
-            stadiumGroup.add(field);
-            
-            updateLoadingProgress(40);
-
-            // Create stands
-            createStands(stadiumGroup);
-            updateLoadingProgress(60);
-
-            // Create roof structure
-            createRoof(stadiumGroup);
-            updateLoadingProgress(80);
-
-            // Create entrance gates
-            createEntrances(stadiumGroup);
-            
-            stadium = stadiumGroup;
-            scene.add(stadium);
-            updateLoadingProgress(100);
         }
 
-        function createFieldTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            
-            // Create grass texture with stripes
-            for (let i = 0; i < 512; i += 32) {
-                ctx.fillStyle = i % 64 === 0 ? '#2d5016' : '#3d6026';
-                ctx.fillRect(i, 0, 32, 512);
-            }
-            
-            // Add field markings
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(50, 50, 412, 412);
-            ctx.beginPath();
-            ctx.arc(256, 256, 80, 0, Math.PI * 2);
-            ctx.stroke();
-            
-            return new THREE.CanvasTexture(canvas);
-        }
+         function push_modelGLB_not_animed(posx=0, posy=0, posz=0, url, sizeX=1, sizeY=1, sizeZ=1, rotx=0, roty=0, rotz=0, resolve, reject) {
+    const loader = new THREE.GLTFLoader();
+    loader.load(url, function(gltf) {
+        updateLoadingProgress(60);
+        
+        const model = gltf.scene;
+        
+        // Crear un grupo para centrar y rotar correctamente
+        const modelGroup = new THREE.Group();
+        
+        // PASO IMPORTANTE: Calcular el centro del bounding box y centrar el modelo
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        
+        // Mover el modelo para centrarlo en el origen del grupo
+        model.position.sub(center);
+        
+        // Ahora añadir el modelo centrado al grupo
+        modelGroup.add(model);
+        
+        // Aplicar transformaciones al GRUPO, no al modelo individual
+        modelGroup.scale.set(sizeX, sizeY, sizeZ);
+        modelGroup.rotation.set(rotx, roty, rotz);
+        modelGroup.position.set(posx, posy, posz);
+        
+        // Enable shadows and add interaction data
+        model.traverse(function(child) {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                
+                // Add interaction data to meshes based on their names or materials
+                if (child.name.toLowerCase().includes('field') || 
+                    child.name.toLowerCase().includes('campo') ||
+                    child.name.toLowerCase().includes('grass')) {
+                    child.userData = { type: 'field' };
+                } else if (child.name.toLowerCase().includes('stand') || 
+                          child.name.toLowerCase().includes('tribune') ||
+                          child.name.toLowerCase().includes('seat')) {
+                    child.userData = { type: 'stand', section: `Section ${child.name}` };
+                } else if (child.name.toLowerCase().includes('entrance') || 
+                          child.name.toLowerCase().includes('gate') ||
+                          child.name.toLowerCase().includes('door')) {
+                    child.userData = { type: 'entrance', name: child.name };
+                } else {
+                    // Default interaction for stadium parts
+                    child.userData = { type: 'stadium_part' };
+                }
 
-        function createStands(group) {
-            const colors = [0x4A90E2, 0x5BA3F5, 0x357ABD, 0x2E6BA8];
-            
-            // Create four stands around the field
-            for (let i = 0; i < 4; i++) {
-                const standGeometry = new THREE.BoxGeometry(120, 30, 20);
-                const standMaterial = new THREE.MeshLambertMaterial({ color: colors[i] });
-                const stand = new THREE.Mesh(standGeometry, standMaterial);
-                
-                const angle = (i * Math.PI) / 2;
-                const radius = 80;
-                stand.position.x = Math.cos(angle) * radius;
-                stand.position.z = Math.sin(angle) * radius;
-                stand.position.y = 15;
-                stand.rotation.y = angle + Math.PI / 2;
-                stand.castShadow = true;
-                stand.receiveShadow = true;
-                stand.userData = { type: 'stand', section: `Section ${String.fromCharCode(65 + i)}` };
-                
-                group.add(stand);
-                
-                // Add seats details
-                createSeats(stand, group, angle, colors[i]);
-            }
-        }
-
-        function createSeats(stand, group, angle, color) {
-            const seatsGroup = new THREE.Group();
-            const seatGeometry = new THREE.BoxGeometry(1, 0.5, 1);
-            const seatMaterial = new THREE.MeshLambertMaterial({ color: color });
-            
-            for (let row = 0; row < 15; row++) {
-                for (let seat = 0; seat < 30; seat++) {
-                    const seatMesh = new THREE.Mesh(seatGeometry, seatMaterial);
-                    seatMesh.position.x = (seat - 15) * 2;
-                    seatMesh.position.y = row * 1.5;
-                    seatMesh.position.z = -8;
-                    seatsGroup.add(seatMesh);
+                // Solo cambiar color si NO hay textura
+                if (!child.material.map) {
+                    child.material.color = new THREE.Color(0x4A90E2);
                 }
             }
-            
-            seatsGroup.position.copy(stand.position);
-            seatsGroup.rotation.y = angle + Math.PI / 2;
-            group.add(seatsGroup);
-        }
+        });
 
-        function createRoof(group) {
-            const roofGeometry = new THREE.CylinderGeometry(140, 140, 5, 32, 1, true);
-            const roofMaterial = new THREE.MeshLambertMaterial({ 
-                color: 0x6BB6FF,
-                transparent: true,
-                opacity: 0.3,
-                side: THREE.DoubleSide
-            });
-            const roof = new THREE.Mesh(roofGeometry, roofMaterial);
-            roof.position.y = 50;
-            roof.castShadow = true;
-            group.add(roof);
-
-            // Add support pillars
-            for (let i = 0; i < 8; i++) {
-                const pillarGeometry = new THREE.CylinderGeometry(2, 2, 45);
-                const pillarMaterial = new THREE.MeshLambertMaterial({ color: 0x4A90E2 });
-                const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
-                
-                const angle = (i * Math.PI) / 4;
-                pillar.position.x = Math.cos(angle) * 120;
-                pillar.position.z = Math.sin(angle) * 120;
-                pillar.position.y = 22.5;
-                pillar.castShadow = true;
-                group.add(pillar);
-            }
-        }
-
-        function createEntrances(group) {
-            // Create main entrances
-            for (let i = 0; i < 4; i++) {
-                const entranceGeometry = new THREE.BoxGeometry(15, 20, 8);
-                const entranceMaterial = new THREE.MeshLambertMaterial({ color: 0x2196F3 });
-                const entrance = new THREE.Mesh(entranceGeometry, entranceMaterial);
-                
-                const angle = (i * Math.PI) / 2 + Math.PI / 4;
-                const radius = 110;
-                entrance.position.x = Math.cos(angle) * radius;
-                entrance.position.z = Math.sin(angle) * radius;
-                entrance.position.y = 10;
-                entrance.castShadow = true;
-                entrance.userData = { type: 'entrance', name: `Gate ${i + 1}` };
-                
-                group.add(entrance);
-            }
-        }
+        // Asignar el grupo global para animación
+        stadium = modelGroup;
+        scene.add(stadium);
+        updateLoadingProgress(100);
+        
+        if (resolve) resolve();
+    }, function(progress) {
+        // Update loading progress
+        const percentComplete = (progress.loaded / progress.total) * 40 + 20; // 20-60%
+        updateLoadingProgress(Math.min(percentComplete, 60));
+    }, function(error) {
+        console.error('Error cargando GLB:', error);
+        if (reject) reject(error);
+    });
+}
 
         // Setup lighting system
         function setupLighting() {
@@ -313,6 +255,17 @@
             directionalLight.shadow.camera.top = 200;
             directionalLight.shadow.camera.bottom = -200;
             scene.add(directionalLight);
+
+            // Add some stadium lights for better illumination
+            const spotLight1 = new THREE.SpotLight(0xffffff, 0.5);
+            spotLight1.position.set(50, 100, 50);
+            spotLight1.castShadow = true;
+            scene.add(spotLight1);
+
+            const spotLight2 = new THREE.SpotLight(0xffffff, 0.5);
+            spotLight2.position.set(-50, 100, -50);
+            spotLight2.castShadow = true;
+            scene.add(spotLight2);
         }
 
         // Setup skybox
@@ -367,7 +320,10 @@
             } else if (object.userData.type === 'stand') {
                 showOverlay('ticketsOverlay');
             } else if (object.userData.type === 'entrance') {
-                showOverlay('matchesOverlay'); // Show matches when clicking entrance
+                showOverlay('matchesOverlay');
+            } else if (object.userData.type === 'stadium_part') {
+                // Default action for any stadium part
+                showOverlay('matchesOverlay');
             }
         }
 
@@ -445,7 +401,7 @@
             
             // Auto-rotate stadium
             if (stadium) {
-                stadium.rotation.y += rotationSpeed;
+            stadium.rotation.y += rotationSpeed;
             }
             
             // Update camera to look at center
@@ -456,7 +412,7 @@
 
         // Utility functions
         function updateLoadingProgress(progress) {
-            document.getElementById('loadingProgress').textContent = progress + '%';
+            document.getElementById('loadingProgress').textContent = Math.round(progress) + '%';
         }
 
         function hideLoadingScreen() {
@@ -465,6 +421,12 @@
             setTimeout(() => {
                 loadingScreen.style.display = 'none';
             }, 1000);
+        }
+
+        function showError(message) {
+            const loadingText = document.querySelector('.loading-text');
+            loadingText.textContent = message;
+            loadingText.style.color = '#ff4444';
         }
 
         function updateNextMatchDate() {
@@ -515,4 +477,3 @@
     </script>
 </body>
 </html>
-
